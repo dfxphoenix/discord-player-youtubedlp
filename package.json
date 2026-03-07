@@ -1,0 +1,57 @@
+{
+  "name": "discord-player-youtubedlp",
+  "version": "1.1.8",
+  "description": "A YouTube yt-dlp extractor for Discord Player.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "discord-player",
+    "youtube",
+    "ytdlp",
+    "yt-dlp",
+    "extractor",
+    "music",
+    "discord"
+  ],
+  "author": "dFxPhoeniX",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dfxphoenix/discord-player-youtubedlp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dfxphoenix/discord-player-youtubedlp/issues"
+  },
+  "homepage": "https://github.com/dfxphoenix/discord-player-youtubedlp#readme",
+  "peerDependencies": {
+    "discord-player": "^7.2.0"
+  },
+  "dependencies": {
+    "tiny-typed-emitter": "^2.1.0",
+    "youtubei.js": "^16.0.1",
+    "ytdlp-nodejs": "^3.4.4"
+  },
+  "devDependencies": {
+    "discord-player": "^7.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
