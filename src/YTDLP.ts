@@ -1,4 +1,4 @@
-import { spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import type { Readable, Duplex } from 'stream';
 import { PassThrough } from 'stream';
 import * as fs from 'fs';
@@ -554,39 +554,27 @@ function which(cmd: string): string | null {
     return null;
 }
 
-/** Resolves the yt-dlp binary path (package bin, or 'yt-dlp'). */
+/** Resolves the yt-dlp binary using ytdlp-nodejs' own platform-aware resolver. */
 function getYtDlpBinaryPath(): string {
-    if (YTDLP_BIN) return YTDLP_BIN;
-
-    const fromPath = which('yt-dlp');
-    if (fromPath) return fromPath;
-
-    const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-    try {
-        const entry = require.resolve('ytdlp-nodejs');
-        let dir = path.dirname(entry);
-        for (let i = 0; i < 4; i++) {
-            const candidate = path.join(dir, 'bin', binName);
-            if (fs.existsSync(candidate)) {
-                try { if (process.platform !== 'win32') fs.chmodSync(candidate, 0o755); } catch {}
-                return candidate;
-            }
-            dir = path.dirname(dir);
-        }
-    } catch {}
-
-    return binName;
-}
-
-/** Get yt-dlp args from command. */
-function supportsArg(cmd: string, arg: string): boolean {
-    try {
-        const r = spawnSync(cmd, ['--help'], { encoding: 'utf8', windowsHide: true });
-        const out = (r.stdout || '') + (r.stderr || '');
-        return out.includes(arg);
-    } catch {
-        return false;
+    // Explicitly configured binary path
+    if (YTDLP_BIN) {
+        return YTDLP_BIN;
     }
+
+    // System-wide yt-dlp from PATH
+    const systemBinary = which('yt-dlp');
+    if (systemBinary) {
+        return systemBinary;
+    }
+
+    // Binary managed by ytdlp-nodejs
+    const binaryPath = core.binaryPath;
+
+    if (!binaryPath || !fs.existsSync(binaryPath)) {
+        throw new Error(`yt-dlp binary not found. ytdlp-nodejs resolved path: ${binaryPath || 'none'}`);
+    }
+
+    return binaryPath;
 }
 
 /** Spawns yt-dlp to stream bestaudio to stdout, with headers/cookies/proxy applied. */
@@ -596,7 +584,6 @@ function spawnYtDlpReadable(
     extraArgs: string[] = []
 ): { child: ChildProcessWithoutNullStreams; stdout: Readable } {
     const cmd = getYtDlpBinaryPath();
-    const hasJsRuntimes = supportsArg(cmd, '--js-runtimes');
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-frag-'));
 
@@ -607,7 +594,7 @@ function spawnYtDlpReadable(
         '--fragment-retries', 'infinite',
         '--retry-sleep', '1',
         '--no-cache-dir',
-        ...(hasJsRuntimes ? ['--js-runtimes', 'node'] : []),
+        '--js-runtimes', 'node',
         '--no-keep-fragments',
         '--no-part',
         '--concurrent-fragments', '1',
@@ -650,29 +637,6 @@ function spawnYtDlpReadable(
 }
 
 /* =========================================================
- * yt-dlp --help flag support cache
- * =======================================================*/
-const _ytdlpHelpCache: { text: string | null } = { text: null };
-
-function getYtDlpHelpText(): string {
-    if (_ytdlpHelpCache.text != null) return _ytdlpHelpCache.text;
-    try {
-        const cmd = getYtDlpBinaryPath();
-        const r = spawnSync(cmd, ['--help'], { encoding: 'utf8', windowsHide: true });
-        _ytdlpHelpCache.text = String(r.stdout || '') + '\n' + String(r.stderr || '');
-        return _ytdlpHelpCache.text;
-    } catch {
-        _ytdlpHelpCache.text = '';
-        return '';
-    }
-}
-
-function ytDlpSupportsFlag(flag: string): boolean {
-    const h = getYtDlpHelpText();
-    return h.includes(flag);
-}
-
-/* =========================================================
  * yt-dlp JSON info via spawn
  * =======================================================*/
 async function spawnYtDlpJson(url: string, runnerOpt: any, extraArgs: string[] = []) {
@@ -689,6 +653,7 @@ async function spawnYtDlpJson(url: string, runnerOpt: any, extraArgs: string[] =
         '--dump-single-json',
         '--skip-download',
         '--ignore-config',
+        '--js-runtimes', 'node',
         ...(runnerOpt?.proxy ? ['--proxy', String(runnerOpt.proxy)] : []),
         ...(runnerOpt?.forceIpv4 ? ['--force-ipv4'] : []),
         ...(runnerOpt?.cookiesFromBrowser ? ['--cookies-from-browser', String(runnerOpt.cookiesFromBrowser)] : []),
@@ -696,10 +661,6 @@ async function spawnYtDlpJson(url: string, runnerOpt: any, extraArgs: string[] =
         ...(runnerOpt?.userAgent ? ['--user-agent', String(runnerOpt.userAgent)] : []),
         ...addHeaders.flatMap(h => ['--add-header', h]),
     ];
-
-    if (ytDlpSupportsFlag('--js-runtimes')) {
-        args.push('--js-runtimes', 'node');
-    }
 
     if (Array.isArray(extraArgs) && extraArgs.length) {
         args.push(...extraArgs.filter(Boolean).map(x => String(x)));

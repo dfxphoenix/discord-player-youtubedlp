@@ -1,6 +1,6 @@
 {
   "name": "discord-player-youtubedlp",
-  "version": "1.1.8",
+  "version": "1.2.1",
   "description": "A YouTube yt-dlp extractor for Discord Player.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -46,12 +46,15 @@
   },
   "dependencies": {
     "tiny-typed-emitter": "^2.1.0",
-    "youtubei.js": "^16.0.1",
-    "ytdlp-nodejs": "^3.4.4"
+    "youtubei.js": "^18.0.0",
+    "ytdlp-nodejs": "^3.4.5"
   },
   "devDependencies": {
     "discord-player": "^7.2.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }
