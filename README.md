@@ -440,3 +440,14 @@ setYtDlpPath("/usr/local/bin/yt-dlp");
 - Audio streaming itself is done through yt-dlp + FFmpeg.
 - Standard playlists are supported.
 - Mix-style YouTube lists are currently treated as single videos, not expanded as full playlists.
+
+## Development
+
+```bash
+npm install
+npm test
+npm run build
+```
+
+Tests use local responses for YouTube.js and yt-dlp and do not connect to Discord or download audio.
+They run only through `npm test` and are not included in the published package.

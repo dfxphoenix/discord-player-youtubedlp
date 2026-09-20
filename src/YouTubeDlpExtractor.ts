@@ -448,6 +448,7 @@ function normalizeThumbnailList(input: any): Array<{ url: string }> {
 function extractThumbnailList(node: any): Array<{ url: string }> {
     return normalizeThumbnailList(
         node?.thumbnails ||
+            node?.content_image?.image ||
             node?.thumbnail?.thumbnails ||
             node?.thumbnail ||
             node?.author?.thumbnails ||
@@ -460,6 +461,10 @@ function extractThumbnailList(node: any): Array<{ url: string }> {
  * Extracts a channel/author name from youtubei.js entities.
  */
 function extractAuthorName(node: any): string {
+    const rows = node?.metadata?.metadata?.metadata_rows ?? [];
+    const parts = rows.flatMap((row: any) => row.metadata_parts ?? []);
+    const author = parts.find((part: any) => part.text?.endpoint?.payload?.browseId?.startsWith("UC"));
+
     return (
         textFrom(node?.author?.name) ||
         textFrom(node?.author) ||
@@ -468,6 +473,7 @@ function extractAuthorName(node: any): string {
         textFrom(node?.uploader) ||
         textFrom(node?.artists?.[0]?.name) ||
         textFrom(node?.short_author) ||
+        textFrom(author?.text) ||
         "YouTube"
     );
 }
@@ -509,11 +515,17 @@ function extractDurationFormatted(node: any): string {
         return secondsToDuration(seconds);
     }
 
+    // LockupView stores the duration in a thumbnail badge
+    const overlays = node?.content_image?.overlays ?? [];
+    const badges = overlays.flatMap((overlay: any) => overlay.badges ?? []);
+    const durationBadge = badges.find((badge: any) => /^\d+(?::\d{2}){1,2}$/.test(badge.text ?? ""));
+
     return (
         textFrom(node?.duration?.text) ||
         textFrom(node?.duration_text) ||
         textFrom(node?.length_text) ||
         textFrom(node?.durationFormatted) ||
+        durationBadge?.text ||
         "0:00"
     );
 }
@@ -521,25 +533,32 @@ function extractDurationFormatted(node: any): string {
 /**
  * Normalizes a youtubei.js search/playlist video node into the extractor raw format.
  */
-function normalizeYoutubeiVideoNode(node: any, fallbackQuery: string): YtRaw | null {
-    if (!node) return null;
+function normalizeYoutubeiVideoNode(node: any): YtRaw | null {
+    if (!node || node.is_playable === false) return null;
+    if (node.style === "PLAYLIST_VIDEO_RENDERER_STYLE_RECOMMENDED_VIDEO") return null;
+    if (node.content_type && !["VIDEO", "MOVIE", "SHORT", "STATION"].includes(node.content_type)) return null;
 
-    const rawId =
-        node?.id ||
-        node?.video_id ||
-        node?.videoId ||
-        getYouTubeVideoId(String(node?.url || node?.webpage_url || node?.original_url || ""));
+    // LockupView and Shorts expose the video ID in different fields
+    const id = [
+        node.id,
+        node.video_id,
+        node.videoId,
+        node.content_id,
+        node.endpoint?.payload?.videoId,
+        node.on_tap_endpoint?.payload?.videoId,
+        node.renderer_context?.command_context?.on_tap?.payload?.videoId,
+        getYouTubeVideoId(String(node.url || node.webpage_url || node.original_url || ""))
+    ].find((value) => typeof value === "string" && /^[a-zA-Z0-9_-]{11}$/.test(value));
+    if (!id) return null;
 
-    const id = rawId ? String(rawId) : "";
-    const fallbackUrl = id ? `https://www.youtube.com/watch?v=${id}` : fallbackQuery;
-    const url = toCanonicalVideoUrl(String(node?.url || node?.webpage_url || node?.original_url || fallbackUrl));
-    const title = textFrom(node?.title || node?.headline || node?.video_title) || "Unknown title";
+    const url = `https://www.youtube.com/watch?v=${id}`;
+    const title = textFrom(node.title || node.headline || node.video_title || node.metadata?.title || node.overlay_metadata?.primary_text) || "Unknown title";
     const author = extractAuthorName(node);
     const durationFormatted = extractDurationFormatted(node);
     const thumbnails = extractThumbnailList(node);
 
     return {
-        id: id || getYouTubeVideoId(url) || undefined,
+        id,
         title,
         description: textFrom(node?.description || node?.snippet || node?.short_description || ""),
         url,
@@ -874,28 +893,24 @@ export class YouTubeDlpExtractor extends BaseExtractor<YouTubeDlpExtractorInit> 
     }
 
     /**
-     * Normalizes a playlist entry so it always exposes a canonical video URL and id.
+     * Normalizes playable playlist entries into canonical video URLs
      */
-    private normalizePlaylistEntry(item: YtRaw): YtRaw {
-        const id = item?.id || item?.videoId || item?.video_id || item?.url;
-        const finalId = typeof id === "string" && id.startsWith("http")
-            ? (getYouTubeVideoId(id) || id)
-            : id;
-        const baseUrl = item?.url || item?.webpage_url || item?.original_url || "";
-        const finalUrl = finalId && typeof finalId === "string" && !finalId.startsWith("http")
-            ? `https://www.youtube.com/watch?v=${String(finalId)}`
-            : (baseUrl ? toCanonicalVideoUrl(String(baseUrl)) : "");
+    private normalizePlaylistEntry(item: YtRaw): YtRaw | null {
+        if (!item || item.is_playable === false) return null;
+
+        const id = [item.id, item.videoId, item.video_id, item.url, item.webpage_url, item.original_url]
+            .map((value) => typeof value === "string" && value.startsWith("http") ? getYouTubeVideoId(value) : value)
+            .find((value) => typeof value === "string" && /^[a-zA-Z0-9_-]{11}$/.test(value));
+        if (!id) return null;
+
+        const url = `https://www.youtube.com/watch?v=${id}`;
 
         return {
             ...item,
-            id: item?.id || item?.videoId || item?.video_id || getYouTubeVideoId(finalUrl) || undefined,
-            ...(finalUrl
-                ? {
-                      url: finalUrl,
-                      webpage_url: finalUrl,
-                      original_url: finalUrl
-                  }
-                : {})
+            id,
+            url,
+            webpage_url: url,
+            original_url: url
         };
     }
 
@@ -996,7 +1011,7 @@ export class YouTubeDlpExtractor extends BaseExtractor<YouTubeDlpExtractorInit> 
                 "youtubei.js search"
             );
             const results = Array.from(search?.videos || [])
-                .map((item: any) => normalizeYoutubeiVideoNode(item, query))
+                .map((item: any) => normalizeYoutubeiVideoNode(item))
                 .filter(Boolean) as YtRaw[];
 
             if (results.length) {
@@ -1131,13 +1146,15 @@ export class YouTubeDlpExtractor extends BaseExtractor<YouTubeDlpExtractorInit> 
                 this.playlistTimeoutMs,
                 "youtubei.js getPlaylist"
             );
+            const playlistInfo = playlist?.info ?? playlist;
 
             const maxItems = typeof this.options.playlistSearchLimit === "number"
                 ? Math.max(1, this.options.playlistSearchLimit)
                 : Number.POSITIVE_INFINITY;
 
-            let items = Array.from(playlist?.videos || [])
-                .map((item: any) => normalizeYoutubeiVideoNode(item, playlistUrl))
+            // items excludes recommended videos from the playlist
+            let items = Array.from(playlist?.items ?? playlist?.videos ?? [])
+                .map((item: any) => normalizeYoutubeiVideoNode(item))
                 .filter(Boolean) as YtRaw[];
 
             while (
@@ -1151,25 +1168,24 @@ export class YouTubeDlpExtractor extends BaseExtractor<YouTubeDlpExtractorInit> 
                     "youtubei.js playlist continuation"
                 );
 
-                const nextItems = Array.from(playlist?.videos || [])
-                    .map((item: any) => normalizeYoutubeiVideoNode(item, playlistUrl))
+                const nextItems = Array.from(playlist?.items ?? playlist?.videos ?? [])
+                    .map((item: any) => normalizeYoutubeiVideoNode(item))
                     .filter(Boolean) as YtRaw[];
 
-                if (!nextItems.length) break;
                 items = this.dedupeItems([...items, ...nextItems]);
             }
 
             const normalizedItems = this.dedupeItems(items.map((item) => this.normalizePlaylistEntry(item)));
             if (normalizedItems.length) {
                 const raw: YtRaw = {
-                    id: String((playlist as any)?.id || listId),
+                    id: String(playlistInfo?.id || listId),
                     playlist_id: String(listId),
-                    title: textFrom((playlist as any)?.title) || "YouTube Playlist",
-                    description: textFrom((playlist as any)?.description || ""),
-                    author: extractAuthorName(playlist),
-                    channel: extractAuthorName(playlist),
-                    channel_url: extractChannelUrl(playlist),
-                    thumbnails: extractThumbnailList(playlist),
+                    title: textFrom(playlistInfo?.title) || "YouTube Playlist",
+                    description: textFrom(playlistInfo?.description || ""),
+                    author: extractAuthorName(playlistInfo),
+                    channel: extractAuthorName(playlistInfo),
+                    channel_url: extractChannelUrl(playlistInfo),
+                    thumbnails: extractThumbnailList(playlistInfo),
                     url: playlistUrl,
                     webpage_url: playlistUrl,
                     original_url: playlistUrl,
