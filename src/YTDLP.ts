@@ -1022,11 +1022,16 @@ function StreamDownloader(url: string, options?: YTDLPStreamOptions) {
     // Normal exit
     process.on('exit', safeCleanup);
 
-    // Ctrl+C
-    process.once('SIGINT', () => { safeCleanup(); });
+    // Preserve application shutdown handlers while cleaning up audio sessions
+    const handleSignal = (signal: NodeJS.Signals) => {
+        safeCleanup();
+        if (process.listenerCount(signal) === 0) {
+            process.kill(process.pid, signal);
+        }
+    };
 
-    // SIGTERM (systemd/docker/etc.)
-    process.once('SIGTERM', () => { safeCleanup(); });
+    process.once('SIGINT', () => handleSignal('SIGINT'));
+    process.once('SIGTERM', () => handleSignal('SIGTERM'));
 
     // Uncaught errors/unhandled promises
     process.on('uncaughtException', (err) => {

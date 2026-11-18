@@ -1,6 +1,6 @@
 {
   "name": "discord-player-youtubedlp",
-  "version": "1.2.2",
+  "version": "1.2.4",
   "description": "A YouTube yt-dlp extractor for Discord Player.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "node --test \"tests/*.test.js\"",
+    "test": "node --test",
     "dev": "tsup --watch",
     "prepublishOnly": "npm run build"
   },
